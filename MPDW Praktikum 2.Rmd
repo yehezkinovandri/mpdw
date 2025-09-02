@@ -1,0 +1,173 @@
+---
+title: "MPDW Kuliah 2 rev"
+author: "Yehezki Novandri Liman"
+date: "2025-09-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Membuka Library
+
+```{r}
+library(readxl)
+library(lmtest)
+library(orcutt)
+library(HoRM)
+library(ggplot2)
+```
+# Membaca Data
+
+```{r}
+data <- read_xlsx("C:\\Users\\Yehezki\\Downloads\\Data IPM MPDW.xlsx")
+data
+```
+# Eksplorasi Data
+
+```{r}
+str(data)
+dim(data)
+```
+```{r}
+summary(data)
+```
+
+## Plot Deret Waktu
+
+```{r}
+data.ts <- ts(data$`IPM Malang`)
+ts.plot(data.ts, xlab="Time Period ", ylab="IPM Malang", 
+        main = "Time Series Plot")
+points(data.ts)
+```
+# Pembuatan Model Awal
+
+```{r}
+model <- lm (`IPM Malang` ~ `Tahun`, data=data)
+summary(model)
+```
+Model awal menghasilkan R-Sq sebesar 98.75%, menandakan bahwa model sangat baik. Namun, perlu ditelusuri apakah terdapat pelanggaran asumsi autokorelasi mengingat data ini merupakan data deret waktu.
+
+## Pengecekan Kebebasan Ragam
+
+```{r}
+plot(resid(model), type = "b",
+     main = "Plot Kebebasan Ragam",
+     ylab = "Residual",
+     xlab = "Periode")
+abline(h = 0, col = "red", lty = 2)
+```
+```{r}
+dwtest(model)
+```
+Hasil Durbin-Watson Test menandakan Tolak H0 (p-value < 5%). Hal ini membuktikan bahwa model ini mengalami permasalahan autokorelasi (sisaan tidak saling bebas). Akan dilakukan penanganan autokorelasi menggunakan dua metode.
+
+# Penanganan Autokorelasi
+
+## Cochrane Orcutt
+
+```{r}
+model_co <- cochrane.orcutt(model)
+summary(model_co)
+rho <- model_co$rho
+```
+Model hasil transformasi menghasilkan R-Sq sebesar 92.97%, menandakan bahwa model masih cukup baik meskipun R-Sq mengalami penurunan.
+
+```{r}
+rho
+```
+
+```{r}
+dwtest(model_co)
+```
+Setelah melakukan cochrane orcutt, ternyata model masih mengalami autokorelasi (p-value < 0.05). Namun, jika kita menggunakan taraf nyata 1% (p-value > 0.01), maka model akan terima H0 yang menandakan bahwa model tidak mengalami autokorelasi lagi.
+
+### Manual
+
+```{r}
+ipm.trans <- data$`IPM Malang`[-1] - data$`IPM Malang`[-15]*rho
+tahun.trans <- data$Tahun[-1] - data$Tahun[-15]*rho
+model_co_manual <- lm(ipm.trans~tahun.trans)
+summary(model_co_manual)
+```
+```{r}
+b0_co_manual <- coef(model_co_manual)[1]/(1-rho)
+b1_co_manual <- coef(model_co_manual)[2]
+cat("Koefisien manual Cochrane-Orcutt:\n")
+cat("b0:", b0_co_manual, "\n")
+cat("b1:", b1_co_manual, "\n")
+```
+## Hildreth-Lu
+
+```{r}
+hildreth.lu.func<- function(r, model){
+  x <- model.matrix(model)[,-1]
+  y <- model.response(model.frame(model))
+  n <- length(y)
+  t <- 2:n
+  y <- y[t]-r*y[t-1]
+  x <- x[t]-r*x[t-1]
+  
+  return(lm(y~x))
+}
+
+#Pencariab rho yang meminimumkan SSE
+r <- c(seq(0.1,0.9, by= 0.1))
+tab <- data.frame("rho" = r, "SSE" = sapply(r, function(i){deviance(hildreth.lu.func(i, model))}))
+round(tab, 4)
+```
+Dapat terlihat, pada rho = 0.6, akan dihasilkan SSE yang paling minimum. Kita perlu menelusuri rho yang lebih detail di sekitar rho = 0.6.
+
+```{r}
+#Rho optimal di sekitar 0.6
+rOpt <- seq(0.5,0.7, by= 0.001)
+tabOpt <- data.frame("rho" = rOpt, "SSE" = sapply(rOpt, function(i){deviance(hildreth.lu.func(i, model))}))
+head(tabOpt[order(tabOpt$SSE),])
+```
+Berdasarkan hasil diatas, maka akan digunakan rho = 0.643 pada metode Hildreth-Lu ini.
+
+```{r}
+#Grafik SSE optimum
+par(mfrow = c(1,1))
+plot(tab$SSE ~ tab$rho , type = "l", xlab = "Rho", ylab = "SSE")
+abline(v = tabOpt[tabOpt$SSE==min(tabOpt$SSE),"rho"], lty = 2, col="red",lwd=2)
+text(x=0.65, y=1.04, labels = "rho=0.643", cex = 0.8)
+```
+```{r}
+model_hl <- hildreth.lu(data$`IPM Malang`, data$Tahun, rho = 0.643)
+summary(model_hl)
+```
+Model hasil transformasi menghasilkan R-Sq sebesar 92.97%, menandakan bahwa model masih cukup baik walaupun R-Sq nya mengalami penurunan.
+
+```{r}
+#Transformasi Balik
+cat("y = ", coef(model_hl)[1]/(1-0.643), "+", coef(model_hl)[2],"x", sep = "")
+```
+```{r}
+#Deteksi autokorelasi
+dwtest(model_hl)
+```
+Setelah melakukan cochrane orcutt, ternyata model masih mengalami autokorelasi (p-value < 0.05). Namun, jika kita menggunakan taraf nyata 1% (p-value > 0.01), maka model akan terima H0 yang menandakan bahwa model tidak mengalami autokorelasi lagi.
+
+# Evaluasi Hasil Akhir
+
+```{r}
+# Menghitung SSE untuk setiap model secara manual
+sse_awal <- sum(residuals(model)^2)
+sse_co <- sum(residuals(model_co)^2)
+sse_hl <- sum(residuals(model_hl)^2)
+
+# Membuat tabel perbandingan
+data.frame(
+  Metode = c("Model Awal (Sakit)", "Cochrane-Orcutt (Sehat)", "Hildreth-Lu (Sehat)"),
+  SSE = c(sse_awal, sse_co, sse_hl),
+  DW_Statistic = c(dwtest(model)$statistic, model_co$DW[3], dwtest(model_hl)$statistic)
+)
+```
+-   Baik metode Cochrane-Orcutt maupun Hildreth-Lu berhasil menurunkan SSE model, artinya model yang baru lebih akurat.
+
+-   Namun, Keduanya belum berhasil menghilangkan autokorelasi pada taraf nyata 5%. Namun, pada taraf nyata 1%, autokorelasi dapat dikatakan berhasil diatasi.
+
+-   Model akhir yang seharusnya kita gunakan adalah salah satu dari model yang telah ditangani, karena estimasi koefisien dan uji signifikansinya sekarang jauh lebih dapat dipercaya.
