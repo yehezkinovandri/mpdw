@@ -1,0 +1,346 @@
+---
+title: "Tugas MPDW Pertemuan 4"
+author: "Yehezki Novandri Liman"
+output:
+  html_document:
+    theme: yeti
+    toc: true
+    toc_float: true
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Pemanggilan Library
+
+```{r}
+library(dLagM)
+library(dynlm)
+library(MLmetrics)
+library(lmtest)
+library(car)
+library(ggplot2)
+library(dplyr)
+library(lmtest)
+```
+# Impor dan Pembersihan Data
+
+```{r}
+data <- read.csv("C:\\Users\\Yehezki\\Downloads\\NewDelhi_Air_quality.csv")
+str(data)
+data
+```
+```{r}
+df <- data[,-c(1,4,10,11,12)]
+df
+```
+Menghapus kolom yang tidak terpakai, yaitu sebagai berikut: "X", "timestamp_local", "timestamp_utc", "ts", "datetime".
+
+# Pemilihan Peubah Bebas berdasarkan Korelasinya dengan Peubah Tak Bebas (AQI)
+
+```{r}
+cor_matrix <- cor(df, df$AQI)
+cor_matrix
+```
+Terlihat bahwa korelasi paling tinggi terdapat pada peubah o3 dengan nilai sebesar 0.9735. Ada korelasi atau hubungan positif antara kenaikan nilai o3 (peubah X) terhadap kenaikan nilai AQI (peubah Y)
+
+## Data Utama
+
+```{r}
+df_fix <- df[,-c(2,3,5,6,7)]
+df_fix
+```
+# Eksplorasi Data
+
+```{r}
+str(df_fix)
+dim(df_fix)
+```
+## Plot X dan Y
+
+```{r}
+ggplot(df, aes(x = df_fix$o3, y = df_fix$AQI)) +
+  geom_point(color = "steelblue", size = 3, alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  theme_minimal() +
+  labs(title = "Visualisasi Peubah X dan Y",
+       x = "X",
+       y = "Y")
+
+```
+
+## Ubah Data menjadi Time Series
+
+```{r}
+df_fix.ts <- ts(df_fix)
+df_fix.ts
+```
+```{r}
+summary(df_fix.ts)
+```
+## Plot Time Series
+
+```{r}
+ts.plot(df_fix.ts[,"AQI"], xlab="Time Period", ylab="AQI", 
+        main = "Time Series Plot")
+points(df_fix.ts[,"AQI"])
+```
+
+Plot Deret Waktu untuk Peubah Tak Bebas Y (AQI).
+
+```{r}
+ts.plot(df_fix.ts[,"o3"], xlab="Time Period", ylab="o3", 
+        main = "Time Series Plot")
+points(df_fix.ts[,"o3"])
+```
+
+Plot Deret Waktu untuk Peubah Bebas X (o3).
+
+# Pembagian Data
+
+Pembagian data latih dengan bobot 80% dan data uji dengan bobot 20%. Kemudian, mendefinisikan data latih dan data uji sebagai time series.
+
+```{r}
+train<-data[1:58,]
+test<-data[59:72,]
+
+train.ts<-ts(train)
+test.ts<-ts(test)
+```
+# Model Koyck
+
+```{r}
+model.koyck <- koyckDlm(x = train$o3, y = train$AQI)
+summary(model.koyck)
+AIC(model.koyck)
+BIC(model.koyck)
+```
+**Interpretasi Hasil:**
+
+-   Dari `summary`, kita dapatkan model:
+
+    $$ \hat{Y_t}=0.2626+0.2582X_t+0.4294Y_{t-1} $$
+
+    Koefisien $X_t$ (0.2582) signifikan, artinya nilai \$X\$ saat ini berpengaruh terhadap $Y$.
+
+-   Koefisien $Y_{t−1}$ (0.4294) juga signifikan. Ini adalah **estimasi untuk** $\lambda$. Nilai ini menunjukkan bahwa sekitar 42% dari efek di periode sebelumnya masih "terbawa" ke periode saat ini.
+
+## Evaluasi dan Peramalan
+
+```{r}
+fore.koyck <- forecast(model = model.koyck, x=test$o3, h=14)
+fore.koyck
+```
+```{r}
+mape.koyck <- MAPE(fore.koyck$forecasts, test$AQI)
+mape.koyck
+```
+Hasil MAPE dari data uji adalah sebesar 0.02909. Hasil yang didapatkan cukup baik karena nilai MAPE dibawah 10%.
+
+```{r}
+GoF(model.koyck)
+```
+Hasil diatas merupakan nilai akurasi dari data latih.
+
+# Regression with Distributed Lag
+
+## Pemodelan Lag = 2
+
+```{r}
+model.dlm <- dlm(x = train$o3,y = train$AQI , q = 2)
+summary(model.dlm)
+AIC(model.dlm)
+BIC(model.dlm)
+```
+Dari hasil diatas, didapat bahwa $P-value$ dari $x_{t-1}<0.05$. Hal ini menunjukkan bahwa $x_{t-1}$ berpengaruh signifikan terhadap $y$. Adapun model keseluruhan yang terbentuk adalah sebagai berikut:
+
+$$\hat{Y_t}=-0.1705+0.4876X_t-0.0175X_{t-1}-0.0059X_{t-2}$$
+
+## Evaluasi dan Peramalan
+
+```{r}
+fore.dlm <- forecast(model = model.dlm, x=test$o3, h=14)
+fore.dlm
+mape.dlm <- MAPE(fore.dlm$forecasts, test$AQI)
+mape.dlm
+```
+Hasil MAPE dari data uji adalah sebesar 0.0064. Hasil yang didapatkan cukup baik karena nilai MAPE dibawah 10%.
+
+```{r}
+GoF(model.dlm)
+```
+Hasil diatas merupakan nilai akurasi dari data latih.
+
+## Pemodelan dengan Lag Optimum
+
+### Mencari Lag Optimum
+
+```{r}
+finiteDLMauto(formula = AQI ~ o3,
+              data = data.frame(train), q.min = 1, q.max = 10,
+              model.type = "dlm", error.type = "AIC", trace = TRUE)
+```
+Berdasarkan output yang diberikan, lag optimum didapat ketika lag = 10.
+
+### Pemodelan
+
+```{r}
+model.dlm2 <- dlm(x = train$o3, y = train$AQI , q = 10)
+summary(model.dlm2)
+AIC(model.dlm2)
+BIC(model.dlm2)
+```
+Dari hasil tersebut terdapat beberapa peubah yang berpengaruh signifikan terhadap taraf nyata 5% yaitu $x_t$ , $x_{t-7}$ , $x_{t-8}$ , $x_{t-9}$. Adapun keseluruhan model yang terbentuk adalah
+
+$$\hat{Y_t}=-0.6427+0.4281X_t+...-0.0954X_{t-10}$$
+
+### Evaluasi dan Peramalan
+
+```{r}
+fore.dlm2 <- forecast(model = model.dlm2, x=test$o3, h=14)
+
+mape.dlm2<- MAPE(fore.dlm2$forecasts, test$AQI)
+mape.dlm2
+```
+Hasil MAPE dari data uji adalah sebesar 0.01272. Hasil yang didapatkan cukup baik karena nilai MAPE dibawah 10%.
+
+```{r}
+GoF(model.dlm2)
+```
+Hasil diatas merupakan nilai akurasi dari data latih.
+
+# Autoregressive
+
+## Pemodelan dengan p = 1 dan q = 1
+
+```{r}
+model.ardl <- ardlDlm(formula = AQI ~ o3, 
+                         data = train,p = 1 , q = 1)
+summary(model.ardl)
+AIC(model.ardl)
+BIC(model.ardl)
+```
+Hasil di atas menunjukkan bahwa peubah $x_t$, $x_{t-1}$, $y_{t-1}$, hasil uji t menunjukkan nilai-p pada peubah $\le0.05$ Hal ini menunjukkan bahwa peubah $x_t$, $x_{t-1}$, $y_{t-1}$ berpengaruh signifikan terhadap $y_t$.
+
+$$
+\hat{Y}=-0,2453+0,4866X_t-0,2318X_{t-1}+0,4563Y_{t-1}
+$$
+
+### Evaluasi dan Peramalan
+
+```{r}
+fore.ardl <- forecast(model = model.ardl, x=test$o3, h=14)
+fore.ardl
+mape.ardl <- MAPE(fore.ardl$forecasts, test$AQI)
+mape.ardl
+```
+Hasil MAPE dari data uji adalah sebesar 0.00779. Hasil yang didapatkan cukup baik karena nilai MAPE dibawah 10%.
+
+```{r}
+GoF(model.ardl)
+```
+Hasil diatas merupakan nilai akurasi dari data latih.
+
+## Pemodelan dengan Lag Optimum
+
+### Mencari Nilai Optimum
+
+```{r}
+model.ardl.opt <- ardlBoundOrders(data = data.frame(df_fix.ts), ic = "AIC", 
+                                  formula = AQI ~ o3 )
+model.ardl.opt
+```
+```{r}
+min_p=c()
+for(i in 1:6){
+  min_p[i]=min(model.ardl.opt$Stat.table[[i]])
+}
+q_opt=which(min_p==min(min_p, na.rm = TRUE))
+p_opt=which(model.ardl.opt$Stat.table[[q_opt]] == 
+              min(model.ardl.opt$Stat.table[[q_opt]], na.rm = TRUE))
+data.frame("q_optimum" = q_opt, "p_optimum" = p_opt, 
+           "AIC"=model.ardl.opt$min.Stat)
+```
+Berdasarkan output yang diberikan, lag optimum didapat ketika p = 13 dan q = 2.
+
+### Pemodelan
+
+```{r}
+model.ardl2 <- ardlDlm(formula = AQI ~ o3, 
+                         data = train,p = 13, q = 2)
+summary(model.ardl2)
+```
+### Evaluasi dan Peramalan
+
+```{r}
+fore.ardl2 <- forecast(model = model.ardl2, x=test$o3, h=14)
+fore.ardl2
+mape.ardl2 <- MAPE(fore.ardl2$forecasts, test$AQI)
+mape.ardl2
+```
+Hasil MAPE dari data uji adalah sebesar 0.01446. Hasil yang didapatkan cukup baik karena nilai MAPE dibawah 10%.
+
+```{r}
+GoF(model.ardl2)
+```
+Hasil diatas merupakan nilai akurasi dari data latih.
+
+# Perbandingan Model
+
+```{r}
+akurasi <- matrix(c(mape.koyck, mape.dlm, mape.dlm2, mape.ardl, mape.ardl2))
+row.names(akurasi)<- c("Koyck","DLM 1","DLM 2","Autoregressive","Autoregressive 2")
+colnames(akurasi) <- c("MAPE")
+akurasi
+```
+Berdasarkan nilai MAPE, model paling optimum didapat pada Model DLM 1 karena memiliki nilai MAPE yang terkecil.
+
+# DLM & ARDL
+
+## Pemodelan
+
+```{r}
+# Model dlm q=1
+cons_lm1 <- dynlm(AQI ~ o3+L(o3),data = train.ts)
+# Model dlm q=2
+cons_lm2 <- dynlm(AQI ~ o3+L(o3)+L(o3,2),data = train.ts)
+# Model ardl p=1 q=0
+cons_lm3 <- dynlm(AQI ~ o3+L(AQI),data = train.ts)
+# Model ardl p=1 q=1
+cons_lm4 <- dynlm(AQI ~ o3+L(o3)+L(AQI),data = train.ts)
+```
+## Ringkasan Model
+
+```{r}
+summary(cons_lm1)
+summary(cons_lm2)
+summary(cons_lm3)
+summary(cons_lm4)
+```
+## Autokorelasi
+
+```{r}
+dwtest(cons_lm1)
+dwtest(cons_lm2)
+dwtest(cons_lm3)
+dwtest(cons_lm4)
+```
+## Heterogenitas
+
+```{r}
+bptest(cons_lm1)
+bptest(cons_lm2)
+bptest(cons_lm3)
+bptest(cons_lm4)
+```
+## Kenormalan
+
+```{r}
+shapiro.test(residuals(cons_lm1))
+shapiro.test(residuals(cons_lm2))
+shapiro.test(residuals(cons_lm3))
+shapiro.test(residuals(cons_lm4))
+```
