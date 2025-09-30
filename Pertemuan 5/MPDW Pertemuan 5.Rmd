@@ -1,0 +1,146 @@
+---
+title: "MPDW Pertemuan 5"
+author: "Yehezki Novandri Liman"
+date: "2025-09-30"
+format:
+  html:
+    self-contained: true
+    embed-resources: true
+    toc: true
+    toc-title: "Daftar Isi"
+    toc-depth: 3
+    toc-location: left
+    code-fold: false
+    code-copy: true
+editor:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Memuat Libraries
+
+```{r}
+library(ggplot2)
+library(tseries)
+library(MASS)
+library(readxl)
+```
+# Input Data
+
+```{r}
+data <- read_xlsx("C:\\Users\\Yehezki\\Downloads\\Page Loads.xlsx")
+print(data)
+```
+Data yang diambil merupakan data frekuensi yang menunjukkan berapa banyak suatu website dikunjungi atau dimuat di laman internet dalam jangka waktu harian.
+
+## Mengambil Data pada Baris ke-101 Sampai 200
+
+```{r}
+df <- data[101:200,]
+print(df)
+```
+## Eksplorasi Pola Data
+
+```{r}
+summary(df$Page.Loads)
+```
+### Barplot per Hari - Pola Mingguan
+
+```{r}
+ggplot(df, aes(x = Day, y = Page.Loads, fill = Day)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Page Loads by Day of Week",
+       x = "Day of Week", y = "Page Loads") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+Visualisasi ini menunjukkan bahwa website ini lebih sering dikunjungi pada hari senin, selasa, rabu dan kamis dalam jangka waktu Desember 2014 - April 2015. Hal ini diindikasikan dengan jumlah page loads lebih dari 50.000 pada masing-masing hari tersebut. Hari selasa merupakan hari dengan total angka kunjungan website tertinggi, sedangkan hari sabtu merupakan hari dengan total angka kunjungan website terendah.
+
+### Boxplot Per Hari
+
+```{r}
+ggplot(df, aes(x = Day, y = Page.Loads, fill = Day)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(title = "Distribution of Page Loads by Day of Week",
+       x = "Day of Week", y = "Page Loads") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+Visualisasi Boxplot per hari ini menunjukkan sebaran dari masing-masing hari terhadap kunjugan website harian. Terlihat bahwa hari rabu memiliki median tertinggi page loads website dibanding hari lainnya, sedangkan hari sabtu memiliki median terendah. Terlihat pola yang sama seperti yang ditampilkan pada barplot, dimana hari senin, selasa, rabu dan kamis merupakan hari-hari dimana website tersebut dominan dikunjungi oleh orang-orang.
+
+### Line Plot / Time Series Plot
+
+```{r}
+ggplot(df, aes(x = Date, y = Page.Loads)) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_point(color = "darkred") +
+  labs(title = "Page Loads Over Time",
+       x = "Date", y = "Page Loads") +
+  theme_minimal()
+```
+Melalui line plot atau time series plot, Terlihat bahwa data page loads memiliki tren meningkat dari bulan Desember 2014 hingga April 2015 dengan pola musiman dalam jarak mingguan.
+
+## Mengubah Tipe Data Agar Terbaca Sebagai Data Deret Waktu
+
+```{r}
+df.ts <- ts(df$Page.Loads)
+```
+
+## Membuat Plot Time Series
+
+```{r}
+plot(df.ts, type = "l",
+     xlab="Time Period", ylab="Page Loads", 
+     main = "Time Series Plot")
+```
+
+Terlihat dengan jelas pada visualisasi plot time series tersebut bahwa data yang kita miliki tidak stasioner dalam rataan. Terdapat pola musiman dengan tren meningkat yang muncul dalam jangka waktu mingguan pada data tersebut. Namun, data ini terlihat stasioner dalam ragam. Hal ini dikarenakan lebar pita dalam plot time series cenderung sama. Selanjutnya, akan dilakukan pengecekan kestasioneran dengan uji formal ADF.
+
+# Pengecekan Kestasioneran
+
+## Plot ACF
+
+```{r}
+acf(df.ts)
+```
+
+Pada plot ACF, terlihat bahwa autokorelasi menurun secara perlahan membentuk gelombang sinus pada banyak lag. Hal ini mengindikasikan adanya ketidakstasioneran dalam rataan.
+
+## Uji ADF
+
+$H_0$ : Data tidak stasioner dalam rataan
+
+$H_1$ : Data stasioner dalam rataan
+
+```{r}
+tseries::adf.test(df.ts)
+```
+Berdasarkan uji ADF tersebut, didapat *p-value* lebih kecil dari taraf nyata 5% sehingga tolak $H_0$ dan menandakan bahwa **data stasioner dalam rataan**. Hal ini tidak sejalan dengan eksplorasi ACF maupun plot time series. Tapi, kita akan mengikuti hasil dari uji formal ADF. Sehingga, data ini stasioner dalam rataan.
+
+## Plot Box-Cox
+
+```{r}
+index <- seq(1, 100)
+
+bc <- boxcox(
+  df.ts ~ index,
+  lambda = seq(0.4, 1.6, by = 0.001)
+)
+
+lambda <- bc$x[which.max(bc$y)]
+lambda
+
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+
+Gambar di atas menunjukkan nilai λ optimum (rounded value) sebesar **1,008** dan selang kepercayaan 95% nilai memiliki batas bawah **0,542** dan batas atas **1,511**. Selang tersebut memuat nilai satu sehingga dapat dikatakan bahwa data ini **stasioner dalam ragam**.
