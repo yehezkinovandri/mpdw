@@ -1,0 +1,327 @@
+---
+title: "MPDW Pertemuan 6 dan 7"
+author: "Yehezki Novandri Liman"
+date: "2025-10-05"
+format:
+  html:
+    self-contained: true
+    embed-resources: true
+    toc: true
+    toc-title: "Daftar Isi"
+    toc-depth: 3
+    toc-location: left
+    code-fold: false
+    code-copy: true
+editor:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Memuat Libraries
+
+```{r}
+library(ggplot2)
+library(tsibble)
+library(tseries)
+library(MASS)
+library(forecast)
+library(TSA)
+library(TTR)
+library(aTSA)
+library(graphics)
+library(readxl)
+```
+
+# Membaca Data Time Series
+
+```{r}
+data <- read_xlsx("C:\\Users\\Yehezki\\Downloads\\Page Loads.xlsx")
+print(data)
+```
+Data yang diambil merupakan data frekuensi yang menunjukkan berapa banyak suatu website dikunjungi atau dimuat di laman internet dalam jangka waktu harian.
+
+## Pembagian Data Time Series
+
+```{r}
+df <- data[101:200,]
+print(df)
+```
+Mengambil data pada baris ke 101-200 sesuai pembagian pada kelompok. Sehingga, data time series yang dimiliki memiliki 100 baris.
+
+## Mengubah Tipe Data Agar Terbaca Sebagai Data Deret Waktu
+
+```{r}
+df.ts <- ts(df$Page.Loads)
+```
+
+## Pembagian Data Latih dan Data Uji
+
+```{r}
+df.train <- df.ts[1:80]
+df.test <- df.ts[81:100]
+df.train; df.test
+```
+Melakukan pembagian pada data menjadi data latih dan data uji, dengan perbandingan proporsi data latih dan data uji 80:20.
+
+# Eksplorasi Data
+
+```{r}
+summary(df$Page.Loads)
+```
+Ringkasan data pada kolom Page Loads.
+
+## Barplot per Hari - Pola Mingguan
+
+```{r}
+ggplot(df, aes(x = Day, y = Page.Loads, fill = Day)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Page Loads by Day of Week",
+       x = "Day of Week", y = "Page Loads") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+Visualisasi ini menunjukkan bahwa website ini lebih sering dikunjungi pada hari senin, selasa, rabu dan kamis dalam jangka waktu Desember 2014 - April 2015. Hal ini diindikasikan dengan jumlah page loads lebih dari 50.000 pada masing-masing hari tersebut. Hari selasa merupakan hari dengan total angka kunjungan website tertinggi, sedangkan hari sabtu merupakan hari dengan total angka kunjungan website terendah.
+
+## Boxplot Per Hari
+
+```{r}
+ggplot(df, aes(x = Day, y = Page.Loads, fill = Day)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(title = "Distribution of Page Loads by Day of Week",
+       x = "Day of Week", y = "Page Loads") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+Visualisasi Boxplot per hari ini menunjukkan sebaran dari masing-masing hari terhadap kunjugan website harian. Terlihat bahwa hari rabu memiliki median tertinggi page loads website dibanding hari lainnya, sedangkan hari sabtu memiliki median terendah. Terlihat pola yang sama seperti yang ditampilkan pada barplot, dimana hari senin, selasa, rabu dan kamis merupakan hari-hari dimana website tersebut dominan dikunjungi oleh orang-orang.
+
+## Line Plot / Time Series Plot
+
+```{r}
+ggplot(df, aes(x = Date, y = Page.Loads)) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_point(color = "darkred") +
+  labs(title = "Page Loads Over Time",
+       x = "Date", y = "Page Loads") +
+  theme_minimal()
+```
+
+Melalui line plot atau time series plot, Terlihat bahwa data page loads memiliki tren meningkat dari bulan Desember 2014 hingga April 2015 dengan pola musiman dalam jarak mingguan.
+
+# Pengecekan Kestasioneran
+
+## Plot Time Series
+
+```{r}
+plot(df.ts, type = "l",
+     xlab="Time Period", ylab="Page Loads", 
+     main = "Time Series Plot")
+```
+
+Terlihat dengan jelas pada visualisasi plot time series tersebut bahwa data yang kita miliki tidak stasioner dalam rataan. Terdapat pola musiman dengan tren meningkat yang muncul dalam jangka waktu mingguan pada data tersebut. Namun, data ini terlihat stasioner dalam ragam. Hal ini dikarenakan lebar pita dalam plot time series cenderung sama. Selanjutnya, akan dilakukan pengecekan kestasioneran dengan uji formal ADF.
+
+## Plot ACF
+
+```{r}
+acf(df.ts)
+```
+
+Pada plot ACF, terlihat bahwa autokorelasi menurun secara perlahan membentuk gelombang sinus pada banyak lag. Hal ini mengindikasikan adanya ketidakstasioneran dalam rataan.
+
+## Uji ADF
+
+$H_0$ : Data tidak stasioner dalam rataan
+
+$H_1$ : Data stasioner dalam rataan
+
+```{r}
+tseries::adf.test(df.ts)
+```
+Berdasarkan uji ADF tersebut, didapat *p-value* lebih kecil dari taraf nyata 5% sehingga tolak $H_0$ dan menandakan bahwa **data stasioner dalam rataan**. Hal ini tidak sejalan dengan eksplorasi ACF maupun plot time series. Tapi, kita akan mengikuti hasil dari uji formal ADF. Sehingga, data ini stasioner dalam rataan.
+
+## Plot Box-Cox
+
+```{r}
+index <- seq(1, 100)
+
+bc <- boxcox(
+  df.ts ~ index,
+  lambda = seq(0.4, 1.6, by = 0.001)
+)
+
+lambda <- bc$x[which.max(bc$y)]
+lambda
+
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+
+Gambar di atas menunjukkan nilai λ optimum (rounded value) sebesar **1,008** dan selang kepercayaan 95% nilai memiliki batas bawah **0,542** dan batas atas **1,511**. Selang tersebut memuat nilai satu sehingga dapat dikatakan bahwa data ini **stasioner dalam ragam**.
+
+# Spesifikasi Model
+
+## Plot ACF dan PACF
+
+```{r}
+par(mfrow = c(1,2))
+acf(df.train, main="ACF", lag.max=20)
+pacf(df.train, main="PACF", lag.max=20)
+par(mfrow = c(1,1))
+```
+
+Berdasarkan Plot ACF, terlihat *tails off* sehingga belum dapat kita asumsikan terdapat pengaruh MA yang kuat pada model. Selanjutnya, berdasarkan plot PACF, terlihat *cuts off* pada lag ketiga sehingga model yang terbentuk adalah ARIMA(3,0,0). Namun, kita juga akan mempertimbangkan ARIMA (2,0,0) pada kasus ini dengan pertimbangan bahwa lag 3 signifikan karena dipengaruhi white noise. Selain dengan plot ACF dan PACF, penentuan spesifikasi model dilakukan dengan *extended ACF* (EACF) berikut ini.
+
+## Plot EACF
+
+```{r}
+eacf(df.train) 
+```
+Menggunakan plot EACF, dapat diambil beberapa model dengan melihat ujung segitiga yang terbentuk, antara lain ARIMA(2,0,1), dan ARIMA(3,0,2)
+
+# Pendugaan Parameter
+
+Dilakukan pendugaan parameter pada keempat model ARIMA yang terbentuk sebelumnya. Pendugaan kemudian akan dilanjutkan dengan melihat nilai AIC pada ringkasan data dan melihat signifikansi parameter.
+
+```{r}
+model1=Arima(df.train, order=c(2,0,0),method="ML")
+summary(model1)
+lmtest::coeftest(model1)
+
+model2=Arima(df.train, order=c(3,0,0),method="ML") 
+summary(model2)
+lmtest::coeftest(model2)
+
+model3=Arima(df.train, order=c(2,0,1),method="ML") 
+summary(model3)
+lmtest::coeftest(model3)
+
+model4=Arima(df.train, order=c(3,0,2),method="ML") 
+summary(model4)
+lmtest::coeftest(model4)
+```
+Berdasarkan pendugaan parameter di atas, nilai AIC terkecil dimiliki oleh model ARIMA(3,0,2), namun tidak didapatkan nilai dugaan parameter dan signifikansi dari masing-masing paramater dalam model ini, sehingga kita tidak bisa menggunakan model ARIMA(3,0,2). Model dengan nilai AIC terkecil kedua ialah ARIMA(2,0,1) dimana 3 diantara 4 parameternya signifikan. Selanjutnya, nilai AIC terkecil ketiga diperoleh oleh model ARIMA(3,0,0), dimana nilai AIC ini tidak jauh berbeda dengan ARIMA(2,0,1). Model ARIMA(3,0,0) signifikan pada seluruh parameternya. Sehingga, model yang akan dipilih adalah ARIMA(3,0,0).
+
+# Analisis Sisaan
+
+Model terbaik hasil identifikasi kemudian dicek asumsi sisaannya. Sisaan model ARIMA harus memenuhi asumsi normalitas, kebebasan, dan kehomogenan ragam. Diagnostik model dilakukan secara eksplorasi dan uji formal.
+
+## Eksplorasi Visual
+
+```{r}
+sisaan <- model2$residuals
+par(mfrow=c(2,2))
+car::qqPlot(sisaan)
+plot(c(1:length(sisaan)),sisaan)
+acf(sisaan)
+pacf(sisaan)
+par(mfrow = c(1,1))
+```
+
+Berdasarkan plot kuantil-kuantil normal, secara eksplorasi ditunjukkan sisaan tidak menyebar normal. Hal ini ditandai oleh beberapa amatan di kedua ujung yang sangat menyimpang dari garis normal tersebut. Kemudian dapat dilihat juga lebar pita sisaan yang cenderung sama menandakan bahwa sisaan memiliki ragam yang homogen. Akan tetapi, plot ACF dan PACF sisaan ARIMA(3,0,0) signifikan pada pada beberapa lag sehingga sisaan tidak saling bebas. Kondisi ini akan diuji lebih lanjut dengan uji formal.
+
+## Uji Formal
+
+### Sisaan Menyebar Normal
+
+```{r}
+ks.test(sisaan,"pnorm") 
+```
+
+Selain dengan eksplorasi, asumsi tersebut dapat diuji menggunakan uji formal. Pada tahapan ini uji formal yang digunakan untuk normalitas adalah uji Kolmogorov-Smirnov (KS). Hipotesis pada uji KS adalah sebagai berikut.
+
+$H_0$ : Sisaan menyebar normal
+
+$H_1$ : Sisaan tidak menyebar normal
+
+Berdasarkan uji KS tersebut, didapat *p-value* lebih kecil dari taraf nyata 5% sehingga tolak $H_0$ dan menandakan bahwa sisaan tidak menyebar normal. Hal ini sesuai dengan hasil eksplorasi menggunakan plot kuantil-kuantil normal.
+
+### Sisaan Saling Bebas / Tidak Ada Autokorelasi
+
+```{r}
+Box.test(sisaan, type = "Ljung") 
+```
+
+Selanjutnya akan dilakukan uji formal untuk kebebasan sisaan menggunakan uji Ljung-Box. Hipotesis yang digunakan adalah sebagai berikut.
+
+$H_0$ : Sisaan saling bebas
+
+$H_1$ : Sisaan tidak tidak saling bebas
+
+Berdasarkan uji Ljung-Box tersebut, didapat *p-value* sebesar 0.9408 yang lebih besar dari taraf nyata 5% sehingga tak tolak $H_0$ dan menandakan bahwa sisaan saling bebas. Hal ini berbeda dengan eksplorasi visual.
+
+### Sisaan Homogen
+
+```{r}
+Box.test((sisaan)^2, type = "Ljung") 
+```
+
+Hipotesis yang digunakan untuk uji kehomogenan ragam adalah sebagai berikut.
+
+$H_0$ : Ragam sisaan homogen
+
+$H_1$ : Ragam sisaan tidak homogen
+
+Berdasarkan uji Ljung-Box terhadap sisaan kuadrat tersebut, didapat *p-value* sebesar 0.2769 yang lebih besar dari taraf nyata 5% sehingga tak tolak $H_0$ dan menandakan bahwa ragam sisaan homogen. Hasil ini sesuai dengan hasil eksplorasi visual.
+
+### Nilai Tengah Sisaan = 0
+
+```{r}
+t.test(sisaan, mu = 0, conf.level = 0.95) 
+```
+
+Terakhir, dengan uji-t, akan dicek apakah nilai tengah sisaan sama dengan nol. Hipotesis yang diujikan sebagai berikut.
+
+$H_0$ : nilai tengah sisaan sama dengan 0
+
+$H_1$ : nilai tengah sisaan tidak sama dengan 0
+
+Berdasarkan uji-ttersebut, didapat *p-value* sebesar 0.846 yang lebih besar dari taraf nyata 5% sehingga tak tolak $H_0$ dan menandakan bahwa nilai tengah sisaan sama dengan nol.
+
+# Overfitting
+
+Tahapan selanjutnya adalah *overfitting* dilakukan dengan menaikkan orde AR(p) dan MA(q) dari model ARIMA(3,0,0) untuk melihat apakah terdapat model lain yang lebih baik dari model saat ini. Kandidat model *overfitting* adalah ARIMA(4,0,0) dan ARIMA(3,0,1).
+
+```{r}
+model1a=Arima(df.train, order=c(4,0,0),method="ML")
+summary(model1a)
+lmtest::coeftest(model1a)
+
+model1b=Arima(df.train, order=c(3,0,1),method="ML")
+summary(model1b)
+lmtest::coeftest(model1b)
+```
+Berdasarkan kedua model hasil *overfitting* di atas, model ARIMA(4,0,0) dan ARIMA(3,0,1) memiliki AIC yang lebih besar dibandingkan dengan model ARIMA(3,0,0) dan parameter kedua model ARIMA(4,0,0) dan ARIMA(3,0,1) tidak seluruhnya signifikan. Oleh karena itu, model ARIMA(3,0,0) akan tetap digunakan untuk melakukan peramalan.
+
+# Peramalan
+
+Peramalan dilakukan menggunakan fungsi `forecast()` . Contoh peramalan berikut ini dilakukan untuk 20 hari ke depan.
+
+```{r}
+ramalan <- forecast::forecast(model2, h = 20) 
+ramalan
+data.ramalan <- ramalan$mean
+plot(ramalan)
+```
+
+Berdasarkan hasil plot ramalan di atas, dapat dilihat bahwa ramalan ARIMA(3,0,0) cenderung semakin menurun seiring bertambahnya waktu ramalan. Selanjutnya, dapat dicari nilai akurasi antara hasil ramalan dengan data uji sebagai berikut.
+
+```{r}
+perbandingan<-matrix(data=c(df.test, data.ramalan),
+                     nrow = 20, ncol = 2)
+colnames(perbandingan)<-c("Aktual","Hasil Forecast")
+perbandingan
+accuracy(data.ramalan, df.test)
+```
+Nilai akurasi menghasilkan nilai MAPE sebesar 27.13131, hal ini menandakan model masih belum cukup mampu untuk menangkap tren ataupun pola dari data tersebut. Sehingga model ARIMA(3,0,0) belum cukup baik untuk meramalkan data time series pada kasus ini.
+
+
+
